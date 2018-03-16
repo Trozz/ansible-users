@@ -1,0 +1,60 @@
+---
+- name: clone repo
+  local_action:
+    module: git
+    repo: https://{{ git_user }}:{{ git_token }}@github.com/{{ git_repo }}
+    dest: "{{ user_keys }}"
+    force: yes
+- name: find files
+  local_action:
+    module: find
+    paths: "{{ user_keys }}"
+  register: found
+- set_fact:
+    users: [ ]
+- set_fact:
+    users: "{{ users }} + [{{ lookup('file', '{{ item.path  }}') }}]"
+  with_items:
+    - "{{ found.files }}"
+- name: Copy sudo template for groups
+  template:
+    src: group_sudo.j2
+    dest: "/etc/sudoers.d/{{ item.group }}"
+  with_items:
+    - "{{ users }}"
+- name: Ensure groups exist
+  group:
+    name: "{{ item.group }}"
+    state: present
+  with_items:
+    - "{{ users }}"
+- name: ensure home_dir exists
+  file:
+    path: "{{ home_dir }}"
+    state: directory
+- name: Create users
+  user:
+    name: "{{ item.user }}"
+    state: "{{ item.state }}"
+    group: "{{ item.group }}"
+    shell: /bin/bash
+    remove: yes
+    createhome: yes
+    home: "{{ home_dir }}/{{ item.user }}"
+  with_items:
+    - "{{ users }}"
+- name: Add SSH key
+  authorized_key:
+    user: "{{ item.user }}"
+    key: "{{ item.key }}"
+    state: "{{ item.state }}"
+    manage_dir: yes
+    exclusive: yes
+  with_items:
+    - "{{ users }}"
+  ignore_errors: true
+- name: remove git repo
+  local_action:
+    module: file
+    state: absent
+    path: "{{ user_keys }}"
